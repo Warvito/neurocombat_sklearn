@@ -6,8 +6,7 @@ import numpy.linalg as la
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.utils import check_array
-from sklearn.utils.validation import (check_is_fitted, check_random_state,
-                                      FLOAT_DTYPES)
+from sklearn.utils.validation import (check_is_fitted, check_random_state, FLOAT_DTYPES)
 
 
 __all__ = [
@@ -133,22 +132,15 @@ def _encode_check_unknown(values, uniques, return_mask=False):
         else:
             return diff
 
-
-
-
+# TODO: do not perform the same of LabelEncoder
 class CombatModel(BaseEstimator, TransformerMixin):
     """"""
-
-    def __init__(self, with_centering=True,
-                 with_scaling=True,
-                 quantile_range=(25.0, 75.0),
-                 copy=True):
-
-        self.discrete_cols = None
-        self.continuous_cols = None
+    def __init__(self, copy=True):
+        self.copy = copy
 
     def _reset(self):
         """Reset internal data-dependent state, if necessary.
+
         __init__ parameters are not touched.
         """
 
@@ -158,7 +150,9 @@ class CombatModel(BaseEstimator, TransformerMixin):
             del self.delta_star
 
     def fit(self, X, covars, batch_col, discrete_cols=None, continuous_cols=None):
-        """"""
+        """Compute the parameters to perform the harmonization/normalization."""
+
+        # Reset internal state before fitting
         self._reset()
 
         # Checa de covars eh pandas.
@@ -203,7 +197,6 @@ class CombatModel(BaseEstimator, TransformerMixin):
         cat_cols = [np.where(covar_labels == c_var)[0][0] for c_var in discrete_cols]
         num_cols = [np.where(covar_labels == n_var)[0][0] for n_var in continuous_cols]
 
-
         # convert batch col to integer
         # also return the indices of the unique array
         # TODO: Usar nome diferente
@@ -215,26 +208,26 @@ class CombatModel(BaseEstimator, TransformerMixin):
         batch_levels, sample_per_batch = np.unique(covars[:, batch_col], return_counts=True)
 
         # TODO: Transformar dict to variables
-        info_dict = {
-            'batch_levels': batch_levels.astype('int'),
-            'n_batch': len(batch_levels),
-            'n_sample': int(covars.shape[0]),
-            'sample_per_batch': sample_per_batch.astype('int'),
-            # pega lista de lista com indices de cada batch
-            'batch_info': [list(np.where(covars[:, batch_col] == idx)[0]) for idx in batch_levels]
-        }
+
+        batch_levels = batch_levels.astype('int')
+        n_batch = len(batch_levels)
+        n_sample =  int(covars.shape[0])
+        sample_per_batch = sample_per_batch.astype('int')
+        # pega lista de lista com indices de cada batch
+        batch_info = [list(np.where(covars[:, batch_col] == idx)[0]) for idx in batch_levels]
+
 
         # create design matrix
         design = self._make_design_matrix(covars, batch_col, cat_cols, num_cols)
 
         # standardize X across features
-        s_data, s_mean, v_pool = self.standardize_across_features(X, design, info_dict)
+        s_data, s_mean, v_pool = self._standardize_across_features(X, design, n_batch, n_sample, sample_per_batch)
 
         # fit L/S models and find priors
-        LS_dict = self.fit_LS_model_and_find_priors(s_data, design, info_dict)
+        LS_dict = self._fit_LS_model_and_find_priors(s_data, design, n_batch, batch_info)
 
         # find parametric adjustments
-        self.gamma_star, self.delta_star = self.find_parametric_adjustments(s_data, LS_dict, info_dict)
+        self.gamma_star, self.delta_star = self._find_parametric_adjustments(s_data, LS_dict, batch_info)
 
         return self
 
@@ -250,14 +243,26 @@ class CombatModel(BaseEstimator, TransformerMixin):
                         estimator=self, dtype=FLOAT_DTYPES,
                         force_all_finite='allow-nan')
 
-        bayes_data = adjust_data_final(s_data, design, gamma_star, delta_star,
-                                       s_mean, v_pool, info_dict)
+        # TODO:Calcular novo n_sample
+        n_sample =  int(covars.shape[0])
+
+        # TODO: Calcular s_data, criar design, stand_mean
+        design = None
+        stand_mean = np.dot(self.grand_mean.T.reshape((len(self.grand_mean), 1)), np.ones((1, n_sample)))
+
+        s_data = None
+
+        bayes_data = _adjust_data_final(s_data,
+                                       design,
+                                       self.gamma_star, self.delta_star,
+                                       stand_mean, self.var_pooled,
+                                       sample_per_batch, n_batch, n_sample, batch_info)
 
         bayes_data = np.array(bayes_data)
 
         return X
 
-    def _make_design_matrix(Y, batch_col, cat_cols, num_cols):
+    def _make_design_matrix(self, Y, batch_col, cat_cols, num_cols):
         """
         Return Matrix containing the following parts:
             - one-hot matrix of batch variable (full)
@@ -298,10 +303,8 @@ class CombatModel(BaseEstimator, TransformerMixin):
         design = np.hstack(hstack_list)
         return design
 
-    def _standardize_across_features(X, design, info_dict):
-        n_batch = info_dict['n_batch']
-        n_sample = info_dict['n_sample']
-        sample_per_batch = info_dict['sample_per_batch']
+    def _standardize_across_features(self, X, design, n_batch, n_sample, sample_per_batch):
+
 
         # https: // github.com / Jfortin1 / ComBatHarmonization / blob / master / Matlab / scripts / combat.m
         # fprintf('[combat] Standardizing Data across features\n')
@@ -326,7 +329,7 @@ class CombatModel(BaseEstimator, TransformerMixin):
         B_hat = np.dot(np.dot(la.inv(np.dot(design.T, design)), design.T), X.T)
         # B.hat < - solve(crossprod(design), tcrossprod(t(design), as.matrix(dat)))
 
-        grand_mean = np.dot((sample_per_batch / float(n_sample)).T, B_hat[:n_batch, :])
+        self.grand_mean = np.dot((sample_per_batch / float(n_sample)).T, B_hat[:n_batch, :])
         # if (! is.null(ref.batch)) {
         # grand.mean < - t(B.hat[ref, ])
         # }
@@ -335,7 +338,7 @@ class CombatModel(BaseEstimator, TransformerMixin):
         # ])
         # }
 
-        var_pooled = np.dot(((X - np.dot(design, B_hat).T) ** 2), np.ones((n_sample, 1)) / float(n_sample))
+        self.var_pooled = np.dot(((X - np.dot(design, B_hat).T) ** 2), np.ones((n_sample, 1)) / float(n_sample))
         # if (! is.null(ref.batch)) {
         # ref.dat < - dat[, batches[[ref]]]
         # var.pooled < - ((ref.dat - t(design[batches[[ref]],
@@ -346,14 +349,14 @@ class CombatModel(BaseEstimator, TransformerMixin):
         # rep(1 / n.array, n.array)
         # }
 
-        stand_mean = np.dot(grand_mean.T.reshape((len(grand_mean), 1)), np.ones((1, n_sample)))
+        stand_mean = np.dot(self.grand_mean.T.reshape((len(self.grand_mean), 1)), np.ones((1, n_sample)))
         # stand.mean < - t(grand.mean) % * % t(rep(1, n.array))
         # if (! is.null(dat2)) stand.mean2 < - t(grand.mean) % * % t(rep(1, n.array2))
         tmp = np.array(design.copy())
         tmp[:, :n_batch] = 0
         stand_mean += np.dot(tmp, B_hat).T
 
-        s_data = ((X - stand_mean) / np.dot(np.sqrt(var_pooled), np.ones((1, n_sample))))
+        s_data = ((X - stand_mean) / np.dot(np.sqrt(self.var_pooled), np.ones((1, n_sample))))
         # s.data < - (dat - stand.mean) / (sqrt(var.pooled) % * % t(rep(1,
         #                                                               n.array)))
         # if (! is.null(dat2)) {
@@ -361,7 +364,7 @@ class CombatModel(BaseEstimator, TransformerMixin):
         # n.array2)))
 
 
-        return s_data, stand_mean, var_pooled
+        return s_data
 
     def _aprior(gamma_hat):
         m = np.mean(gamma_hat)
@@ -379,9 +382,7 @@ class CombatModel(BaseEstimator, TransformerMixin):
     def _postvar(sum2, n, a, b):
         return (0.5 * sum2 + b) / (n / 2.0 + a - 1.0)
 
-    def _fit_LS_model_and_find_priors(s_data, design, info_dict):
-        n_batch = info_dict['n_batch']
-        batch_info = info_dict['batch_info']
+    def _fit_LS_model_and_find_priors(s_data, design, n_batch, batch_info):
 
         batch_design = design[:, :n_batch]
         gamma_hat = np.dot(np.dot(la.inv(np.dot(batch_design.T, batch_design)), batch_design.T), s_data.T)
@@ -393,8 +394,8 @@ class CombatModel(BaseEstimator, TransformerMixin):
         gamma_bar = np.mean(gamma_hat, axis=1)
         t2 = np.var(gamma_hat, axis=1, ddof=1)
 
-        a_prior = list(map(aprior, delta_hat))
-        b_prior = list(map(bprior, delta_hat))
+        a_prior = list(map(_aprior, delta_hat))
+        b_prior = list(map(_bprior, delta_hat))
 
         LS_dict = {}
         LS_dict['gamma_hat'] = gamma_hat
@@ -413,10 +414,10 @@ class CombatModel(BaseEstimator, TransformerMixin):
         change = 1
         count = 0
         while change > conv:
-            g_new = postmean(g_hat, g_bar, n, d_old, t2)
+            g_new = _postmean(g_hat, g_bar, n, d_old, t2)
             sum2 = ((sdat - np.dot(g_new.reshape((g_new.shape[0], 1)), np.ones((1, sdat.shape[1])))) ** 2).sum(
                 axis=1)
-            d_new = postvar(sum2, n, a, b)
+            d_new = _postvar(sum2, n, a, b)
 
             change = max((abs(g_new - g_old) / g_old).max(), (abs(d_new - d_old) / d_old).max())
             g_old = g_new  # .copy()
@@ -425,12 +426,10 @@ class CombatModel(BaseEstimator, TransformerMixin):
         adjust = (g_new, d_new)
         return adjust
 
-    def _find_parametric_adjustments(s_data, LS, info_dict):
-        batch_info = info_dict['batch_info']
-
+    def _find_parametric_adjustments(s_data, LS, batch_info):
         gamma_star, delta_star = [], []
         for i, batch_idxs in enumerate(batch_info):
-            temp = it_sol(s_data[:, batch_idxs], LS['gamma_hat'][i],
+            temp = _it_sol(s_data[:, batch_idxs], LS['gamma_hat'][i],
                           LS['delta_hat'][i], LS['gamma_bar'][i], LS['t2'][i],
                           LS['a_prior'][i], LS['b_prior'][i])
 
@@ -439,11 +438,12 @@ class CombatModel(BaseEstimator, TransformerMixin):
 
         return np.array(gamma_star), np.array(delta_star)
 
-    def _adjust_data_final(s_data, design, gamma_star, delta_star, stand_mean, var_pooled, info_dict):
-        sample_per_batch = info_dict['sample_per_batch']
-        n_batch = info_dict['n_batch']
-        n_sample = info_dict['n_sample']
-        batch_info = info_dict['batch_info']
+    def _adjust_data_final(s_data,
+                           design,
+                           gamma_star, delta_star,
+                           stand_mean, var_pooled,
+                           sample_per_batch, n_batch, n_sample, batch_info):
+
 
         batch_design = design[:, :n_batch]
 
