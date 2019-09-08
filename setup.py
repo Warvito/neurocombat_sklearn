@@ -8,7 +8,6 @@ setuptools.setup(
     version='0.1',
     scripts=['combat'],
     author='Walter Hugo Lopez Pinaya',
-    author_email='ianonimato@hotmail.com',
     description='Harmonizing neuroimaging data across sites. Implementation of neurocombat using sklearn format',
     long_description=long_description,
     long_description_content_type="text/markdown",
