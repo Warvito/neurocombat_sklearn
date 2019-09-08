@@ -4,3 +4,9 @@
 # Virtual Enviroments
 venv/
 
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+
