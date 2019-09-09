@@ -1,14 +1,16 @@
 # NeuroCombat-sklearn
-Implementation of Combat harmonization method in scikit-learn compatible format.
-
-
 [![License: MIT](https://img.shields.io/github/license/Warvito/neurocombat_sklearn)](https://opensource.org/licenses/MIT) 
 [![Version](https://img.shields.io/pypi/v/neurocombat-sklearn)](https://pypi.org/project/neurocombat-sklearn/)
 [![PythonVersion](https://img.shields.io/pypi/pyversions/neurocombat-sklearn)]()
 
+Implementation of Combat harmonization method in scikit-learn compatible format.
+
+
 The Combat harmonization/normalization method uses an parametric empirical Bayes framework to robustly adjust data for site/batch effects. 
-The scikit-learn compatible format was used to facilitates the use of this harmonization method in machine learning projects.
- 
+The scikit-learn compatible format was used to facilitates the use of this harmonization method in machine learning projects. 
+
+
+This repository is developed by [Walter Hugo Lopez Pinaya](https://scholar.google.com/citations?user=jjT5-HUAAAAJ) at King's College London and community contributors.
 
 ## Installation
 

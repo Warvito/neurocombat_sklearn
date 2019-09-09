@@ -5,58 +5,18 @@ import numpy.linalg as la
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.utils import check_array
-from sklearn.utils.validation import (check_is_fitted, FLOAT_DTYPES)
+from sklearn.utils.validation import (check_is_fitted, check_consistent_length, FLOAT_DTYPES)
 
 __all__ = [
     'CombatModel',
 ]
 
 
-def postmean(gamma_hat, gamma_bar, n, delta_star, tau_2):
-    return (tau_2 * n * gamma_hat + delta_star * gamma_bar) / (tau_2 * n + delta_star)
+class CombatModel(BaseEstimator):
+    """Harmonize/normalize features using Combat's [1] parametric empirical Bayes framework
 
-
-def postvar(sum_2, n, a_prior, b_prior):
-    return (0.5 * sum_2 + b_prior) / (n / 2.0 + a_prior - 1.0)
-
-
-class CombatModel(BaseEstimator, TransformerMixin):
-    """Standardize features by removing the mean and scaling to unit variance
-
-    The standard score of a sample `x` is calculated as:
-
-        z = (x - u) / s
-
-    where `u` is the mean of the training samples or zero if `with_mean=False`,
-    and `s` is the standard deviation of the training samples or one if
-    `with_std=False`.
-
-    Centering and scaling happen independently on each feature by computing
-    the relevant statistics on the samples in the training set. Mean and
-    standard deviation are then stored to be used on later data using the
-    `transform` method.
-
-    Standardization of a dataset is a common requirement for many
-    machine learning estimators: they might behave badly if the
-    individual features do not more or less look like standard normally
-    distributed data (e.g. Gaussian with 0 mean and unit variance).
-
-    For instance many elements used in the objective function of
-    a learning algorithm (such as the RBF kernel of Support Vector
-    Machines or the L1 and L2 regularizers of linear models) assume that
-    all features are centered around 0 and have variance in the same
-    order. If a feature has a variance that is orders of magnitude larger
-    that others, it might dominate the objective function and make the
-    estimator unable to learn from other features correctly as expected.
-
-    This scaler can also be applied to sparse CSR or CSC matrices by passing
-    `with_mean=False` to avoid breaking the sparsity structure of the data.
-
-    Read more in the :ref:`User Guide <preprocessing_scaler>`.
-
-    Combat model to normalize across batches.
-
-    Based on https://github.com/ncullen93/neuroCombat/blob/master/neuroCombat/neuroCombat.py
+    [1] Fortin, Jean-Philippe, et al. "Harmonization of cortical thickness
+    measurements across scanners and sites." Neuroimage 167 (2018): 104-120.
     """
 
     def __init__(self, copy=True):
@@ -83,22 +43,21 @@ class CombatModel(BaseEstimator, TransformerMixin):
             del self.delta_star
 
     def fit(self, data, sites, discrete_covariates=None, continuous_covariates=None):
-        """
-        Compute the parameters to perform the harmonization/normalization.
+        """Compute the parameters to perform the harmonization/normalization
 
         Parameters
         ----------
         data : array-like, shape [n_samples, n_features]
             The data used to compute the per-feature statistics
             used for later harmonization along the acquisition sites.
-        sites : array-like, shape [n_samples,]
+        sites : array-like, shape [n_samples, 1]
             The target variable for harmonization problems (e.g. acquisition sites or batches).
         discrete_covariates : array-like, shape [n_samples, n_discrete_covariates]
-            The variables which are categorical that you want to predict
-            (e.g. binary depression or no depression).
+            The covariates which are categorical
+            (e.g. schizophrenia patient or healthy control).
         continuous_covariates : array-like, shape [n_samples, n_continuous_covariates]
-            The variables which are continuous that you want to predict
-            (e.g. depression sub-scores)
+            The covariates which are continuous
+            (e.g. age and clinical scores)
         """
 
         # Reset internal state before fitting
@@ -106,6 +65,8 @@ class CombatModel(BaseEstimator, TransformerMixin):
 
         data = check_array(data, copy=self.copy, estimator=self, dtype=FLOAT_DTYPES)
         sites = check_array(sites, copy=self.copy, estimator=self)
+
+        check_consistent_length(data, sites)
 
         if discrete_covariates is not None:
             self.discrete_covariates_used = True
@@ -120,7 +81,6 @@ class CombatModel(BaseEstimator, TransformerMixin):
         # To have a similar code to neuroCombat and Combat original scripts
         data = data.T
 
-        # TODO: Merge batch design creation with these variables
         sites_names, n_samples_per_site = np.unique(sites, return_counts=True)
 
         self.sites_names = sites_names
@@ -147,21 +107,26 @@ class CombatModel(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, data, sites, discrete_covariates=None, continuous_covariates=None):
-        """Center and scale the data.
+        """Transform data to harmonized space
 
         Parameters
         ----------
         data : array-like
             Input data that will be transformed.
         sites : array-like
+            Site info of the inputted data
         discrete_covariates : array-like
+            The covariates which are categorical
         continuous_covariates : array-like
+            The covariates which are continuous
         """
 
         check_is_fitted(self, 'n_sites')
 
         data = check_array(data, copy=self.copy, estimator=self, dtype=FLOAT_DTYPES)
         sites = check_array(sites, copy=self.copy, estimator=self)
+
+        check_consistent_length(data, sites)
 
         if hasattr(self, 'discrete_covariates_used'):
             discrete_covariates = check_array(discrete_covariates, copy=self.copy,
@@ -174,7 +139,6 @@ class CombatModel(BaseEstimator, TransformerMixin):
         # To have a similar code to neuroCombat and Combat original scripts
         data = data.T
 
-        # TODO: Merge batch design creation with these variables
         new_data_sites_name = np.unique(sites)
 
         # Check all sites from new_data were seen
@@ -196,6 +160,10 @@ class CombatModel(BaseEstimator, TransformerMixin):
 
         return bayes_data.T
 
+    def fit_transform(self, data, sites, *args):
+        """Fit to data, then transform it"""
+        return self.fit(data, sites, *args).transform(data, sites, *args)
+
     def _make_design_matrix(self, sites, discrete_covariates, continuous_covariates, fitting=False):
         """Method to create a design matrix that contain:
 
@@ -206,7 +174,7 @@ class CombatModel(BaseEstimator, TransformerMixin):
 
         Parameters
         ----------
-        sites : array-like [n_samples, n_sites]
+        sites : array-like
         discrete_covariates : array-like
         continuous_covariates : array-like
         fitting : boolean, default is False
@@ -252,7 +220,10 @@ class CombatModel(BaseEstimator, TransformerMixin):
         return design
 
     def _standardize_across_features(self, data, design, n_samples, n_samples_per_site, fitting=False):
-        """
+        """Standardization of the features
+
+        The magnitude of the features could create bias in the empirical Bayes estimates of the prior distribution.
+        To avoid this, the features are standardized to all of them have similar overall mean and variance.
 
         Parameters
         ----------
@@ -261,10 +232,14 @@ class CombatModel(BaseEstimator, TransformerMixin):
         n_samples : integer
         n_samples_per_site : list of integer
         fitting : boolean, default is False
+            Indicates if this method is executed inside the
+            fit method (in order to save the parameters to use later).
 
         Returns
         -------
-
+        standardized_data : array-like
+        standardized_mean : array-like
+            Standardized mean used during the process
         """
         if fitting:
             self.beta_hat = np.dot(np.dot(la.inv(np.dot(design.T, design)), design.T), data.T)
@@ -285,7 +260,14 @@ class CombatModel(BaseEstimator, TransformerMixin):
         return standardized_data, standardized_mean
 
     def _fit_ls_model(self, standardized_data, design, idx_per_site):
-        """"""
+        """Location and scale (L/S) adjustments
+
+        Parameters
+        ----------
+        standardized_data : array-like
+        design : array-like
+        idx_per_site : list of list of integer
+        """
         site_design = design[:, :self.n_sites]
         gamma_hat = np.dot(np.dot(la.inv(np.dot(site_design.T, site_design)), site_design.T), standardized_data.T)
 
@@ -296,7 +278,7 @@ class CombatModel(BaseEstimator, TransformerMixin):
         return gamma_hat, delta_hat
 
     def _find_priors(self, gamma_hat, delta_hat):
-        """"""
+        """Compute a and b priors"""
         gamma_bar = np.mean(gamma_hat, axis=1)
         tau_2 = np.var(gamma_hat, axis=1, ddof=1)
 
@@ -321,7 +303,7 @@ class CombatModel(BaseEstimator, TransformerMixin):
                                      gamma_hat, delta_hat,
                                      gamma_bar, tau_2,
                                      a_prior, b_prior):
-        """"""
+        """Compute empirical Bayes site/batch effect parameter estimates using parametric empirical priors"""
 
         gamma_star, delta_star = [], []
 
@@ -341,11 +323,16 @@ class CombatModel(BaseEstimator, TransformerMixin):
                           gamma_bar, tau_2,
                           a_prior, b_prior,
                           convergence=0.0001):
-        """"""
-
+        """Compute iterative method to find the the parametric site/batch effect adjustments"""
         n = (1 - np.isnan(standardized_data)).sum(axis=1)
         gamma_hat_old = gamma_hat.copy()
         delta_hat_old = delta_hat.copy()
+
+        def postmean(gamma_hat, gamma_bar, n, delta_star, tau_2):
+            return (tau_2 * n * gamma_hat + delta_star * gamma_bar) / (tau_2 * n + delta_star)
+
+        def postvar(sum_2, n, a_prior, b_prior):
+            return (0.5 * sum_2 + b_prior) / (n / 2.0 + a_prior - 1.0)
 
         change = 1
         count = 0
@@ -372,21 +359,7 @@ class CombatModel(BaseEstimator, TransformerMixin):
                            design,
                            standardized_mean,
                            n_samples_per_site, n_samples, idx_per_site):
-        """
-
-        Parameters
-        ----------
-        standardized_data
-        design
-        standardized_mean
-        n_samples_per_site
-        n_samples
-        idx_per_site
-
-        Returns
-        -------
-
-        """
+        """Compute the harmonized/normalized data"""
         n_sites = self.n_sites
         var_pooled = self.var_pooled
         gamma_star = self.gamma_star
