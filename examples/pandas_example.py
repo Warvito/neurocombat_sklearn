@@ -12,13 +12,13 @@ model = CombatModel()
 # Fitting model
 # make sure that your inputs are 2D, e.g. shape [n_samples, n_discrete_covariates]
 model.fit(data,
-          covars['batch'][:, np.newaxis],
-          covars['cancer'][:, np.newaxis],
-          covars['age'][:, np.newaxis])
+          covars[['batch']],
+          covars[['cancer']],
+          covars[['age']])
 
 # Harmonize data
 # could be performed together with fitt by using .fit_transform method
 data_combat = model.transform(data,
-                              covars['batch'][:, np.newaxis],
-                              covars['cancer'][:, np.newaxis],
-                              covars['age'][:, np.newaxis])
+                              covars[['batch']],
+                              covars[['cancer']],
+                              covars[['age']])
