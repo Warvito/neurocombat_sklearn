@@ -1,3 +1,10 @@
+"""
+=====================================================================
+Test2
+=====================================================================
+"""
+print(__doc__)
+
 from neurocombat_sklearn import CombatModel
 import pandas as pd
 import numpy as np

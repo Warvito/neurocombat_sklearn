@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='neurocombat-sklearn',
-    version='0.1.1',
+    version='0.1.3',
     author='Walter Hugo Lopez Pinaya',
     description='Harmonizing neuroimaging data across sites. Implementation of neurocombat using sklearn format',
     long_description=long_description,
