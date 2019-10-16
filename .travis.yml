@@ -43,7 +43,7 @@ install:
 script:
   - mkdir for_test
   - cd for_test
-  - pytest -v --cov=sklearn_rvm --pyargs sklearn_rvm
+  - pytest -v --cov=neurocombat_sklearn --pyargs neurocombat_sklearn
 
 after_success:
   - codecov
